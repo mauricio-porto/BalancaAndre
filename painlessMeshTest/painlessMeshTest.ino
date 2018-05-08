@@ -17,13 +17,17 @@
 const char *ssid = "ESPap";
 const char *password = "";
 
+long reqNumber = 0;
+
 ESP8266WebServer server(80);
 
 /* Just a little test message.  Go to http://192.168.4.1 in a web browser
  * connected to this access point to see it.
  */
 void handleRoot() {
-  server.send(200, "text/html", "<h1>You are connected</h1>");
+  String p1 =  "<h1>Request number ";
+  String body = p1 + ++reqNumber + "</h1>";
+  server.send(200, "text/html", body);
 }
 
 // some gpio pin that is connected to an LED...
