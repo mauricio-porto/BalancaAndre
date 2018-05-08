@@ -1,0 +1,6 @@
+[submodule "HX711"]
+	path = HX711
+	url = https://github.com/bogde/HX711.git
+[submodule "ESPAsyncTCP"]
+	path = ESPAsyncTCP
+	url = https://github.com/me-no-dev/ESPAsyncTCP.git
