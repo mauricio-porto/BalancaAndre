@@ -1,0 +1,34 @@
+﻿{                                         //request = http://192.168.222.11/readAll
+        "response":"readAll",
+        "status":"OK",
+        "values":[                        // valores em décimos de grama (0,1g)
+         {"123456789":"420"},
+         {"234567890":"426"},
+         ...
+         {"901234567":"430"},
+         {"012345678":"396"}
+        ]
+}
+
+
+{                                                        //request = /read?scale=123456789
+        “Response”:”read”,
+        “scale”:”123456789”,
+        “status”:”OK”,
+        “value”:”15”
+}
+
+
+{                                                        //request = /tare?scale=123456789
+        “response”:”tare”,
+        “scale”:”123456789”,
+        “status”:”OK”
+}
+
+
+{                                                        //request = /calibrate?scale=123456789&weight=50
+        “response”:”calibrate”,
+        “Scale”:”123456789”,
+        “weight”:”50”,
+        “status”:”OK”
+}
