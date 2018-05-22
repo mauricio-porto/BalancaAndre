@@ -36,6 +36,7 @@ void receivedCallback( const uint32_t &from, const String &msg );
 String readAll();
 String readScale(String scaleID);
 String tare(String scaleID);
+String blink(String scaleID);
 String calibrate(String scaleID, int weight);
 IPAddress getlocalIP();
 
@@ -106,6 +107,15 @@ void setup() {
       } else {
         request->send(404, "text/plain", "Parametro weight faltando");      
       }
+    } else {
+      request->send(404, "text/plain", "Parametro scale faltando");
+    }
+  });
+
+  server.on("/blink", HTTP_GET, [] (AsyncWebServerRequest *request) {
+    if (request->hasArg("scale")) {
+      String scaleID = request->arg("scale");
+      request->send(200, "text/json", blink(scaleID));
     } else {
       request->send(404, "text/plain", "Parametro scale faltando");
     }
@@ -187,6 +197,20 @@ String tare(String scaleID) {
   StaticJsonBuffer<200> jsonBuffer;
   JsonObject& root = jsonBuffer.createObject();
   root["response"] = "tare";
+  root["scale"] = scaleID;
+  root["status"] = "OK";
+
+  root.prettyPrintTo(response);
+  return response;
+
+}
+
+String blink(String scaleID) {
+  String response;
+
+  StaticJsonBuffer<200> jsonBuffer;
+  JsonObject& root = jsonBuffer.createObject();
+  root["response"] = "blink";
   root["scale"] = scaleID;
   root["status"] = "OK";
 
