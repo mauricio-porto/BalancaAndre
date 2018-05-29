@@ -10,6 +10,9 @@
 // https://github.com/me-no-dev/ESPAsyncWebServer
 //************************************************************
 
+#define _TASK_TIMEOUT
+// #include <TaskScheduler.h>
+
 #include "IPAddress.h"
 #include "painlessMesh.h"
 #include <ArduinoJson.h>
@@ -33,6 +36,8 @@
 // Prototypes
 void replyTo();
 void receivedCallback( const uint32_t &from, const String &msg );
+void taskReadAllCallback();
+void taskReadAllOnDisable();
 String readAll();
 String readScale(String scaleID);
 String tare(String scaleID);
@@ -41,8 +46,11 @@ String calibrate(String scaleID, int weight);
 IPAddress getlocalIP();
 
 painlessMesh  mesh;
-Scheduler     userScheduler; // to control your personal task
+Scheduler     runner; // to control your personal task
 Task taskReplyTo(TASK_SECOND * 1, TASK_FOREVER, &replyTo ); // start with a one second interval
+Task taskReadAll(10 * TASK_MILLISECOND, TASK_FOREVER, &taskReadAllCallback, &runner, false, NULL, &taskReadAllOnDisable);
+
+long num_nodes;
 
 AsyncWebServer server(80);
 IPAddress myIP(0,0,0,0);
@@ -55,11 +63,13 @@ void setup() {
 
   // Channel set to 1. Make sure to use the same channel for your mesh and for you other
   // network (STATION_SSID)
-  mesh.init( MESH_PREFIX, MESH_PASSWORD, &userScheduler, MESH_PORT);
+  mesh.init( MESH_PREFIX, MESH_PASSWORD, &runner, MESH_PORT);
   mesh.onReceive(&receivedCallback);
 
-  userScheduler.addTask(taskReplyTo);
+  runner.addTask(taskReplyTo);
+  runner.addTask(taskReadAll);
 
+  taskReadAll.setTimeout(30 * TASK_SECOND);
 
   // Trying the ACCESS POINT
   // =======================
@@ -144,6 +154,20 @@ void loop() {
 
 void receivedCallback( const uint32_t &from, const String &msg ) {
   //Serial.printf("asyncWebServerTest: Received from %u msg=%s\n", from, msg.c_str());
+}
+
+void taskReadAllCallback() {
+  if (num_nodes <= 0) {
+    taskReadAll.disable();
+  }
+}
+
+void taskReadAllOnDisable() {
+  if (taskReadAll.timedOut()) {
+    Serial.println("taskReadAll has timed out");
+  } else {
+    Serial.println("taskReadAll has received all responses");
+  }
 }
 
 void replyTo() {
