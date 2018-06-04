@@ -61,10 +61,10 @@ void setup() {
   //mesh.stationManual(STATION_SSID, STATION_PASSWORD, STATION_PORT, station_ip);
   //mesh.stationManual(STATION_SSID, STATION_PASSWORD);
   //mesh.setHostname(HOSTNAME);
-  myIP = IPAddress(mesh.getStationIP().addr);
+  myIP = IPAddress(mesh.getStationIP());
   Serial.println("My Station IP is " + myAPIP.toString());
   IPAddress apIP(0,0,0,0);
-  myAPIP = IPAddress(mesh.getAPIP().addr);
+  myAPIP = IPAddress(mesh.getAPIP());
   Serial.println("My AP IP is " + apIP.toString());
 
   userScheduler.addTask(taskReplyTo);
