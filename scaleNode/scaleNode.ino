@@ -5,7 +5,7 @@
 #define   MESH_PORT       5555
 
 // Prototypes
-void replyTo();
+void treatRequest();
 void receivedCallback(uint32_t from, String & msg);
 void newConnectionCallback(uint32_t nodeId);
 void changedConnectionCallback(); 
@@ -23,7 +23,7 @@ String rcvdMsg;
 String replyMsg;
 uint32_t destination;
 
-Task taskReplyTo(TASK_SECOND * 1, TASK_FOREVER, &replyTo ); // start with a one second interval
+Task taskTreatRequest(500 * TASK_MILLISECOND, TASK_FOREVER, &treatRequest ); // start with a one second interval
 
 void setup() {
   Serial.begin(115200);
@@ -37,7 +37,9 @@ void setup() {
   mesh.onNodeTimeAdjusted(&nodeTimeAdjustedCallback);
   mesh.onNodeDelayReceived(&delayReceivedCallback);
 
-  userScheduler.addTask(taskReplyTo);
+  Serial.printf("\n\nMy nodeID is %u\n\n", mesh.getNodeId());
+
+  userScheduler.addTask(taskTreatRequest);
 
 }
 
@@ -51,17 +53,26 @@ void receivedCallback(uint32_t from, String & msg) {
   destination = from;
   rcvdMsg = msg.c_str();
 
-  taskReplyTo.setInterval(random(TASK_MILLISECOND * 500, TASK_MILLISECOND * 2000));
-  taskReplyTo.enable();
+  taskTreatRequest.enable();
 }
 
-void replyTo() {
-  Serial.printf("--> scaleNode: Sending message: %s\n", replyMsg.c_str());
-  
-  // DEVERIA TRATAR A MENSAGEM RECEBIDA E DEPOIS RETORNAR RESPOSTA
-  String cai = "Balanca mas nao cai DOIS!!!";
-  mesh.sendSingle(destination, cai);
-  mesh.sendSingle(destination, rcvdMsg);
+// Apenas responde a pedidos de leitura da balanca
+// Todas os outros são comandos que não exigem retorno/resposta
+void treatRequest() {
+
+  // DEVE TRATAR A MENSAGEM RECEBIDA E DEPOIS RETORNAR RESPOSTA
+  if (rcvdMsg.indexOf("read") >= 0) {  //read?scale=987654321
+    //lê valor e retorna send.single(from, PESO);
+    replyMsg = "56";
+    mesh.sendSingle(destination, replyMsg);
+    Serial.printf("--> scaleNode: Sending message: %s\n", replyMsg.c_str());
+  } else if (rcvdMsg.indexOf("tare") >= 0) {
+    //
+  } else if (rcvdMsg.indexOf("blink") >= 0) {
+    
+  } else if (rcvdMsg.indexOf("calibrate") >= 0) {
+    
+  }
 
   if (calc_delay) {
     SimpleList<uint32_t>::iterator node = nodes.begin();
@@ -71,7 +82,7 @@ void replyTo() {
     }
     calc_delay = false;
   }
-  taskReplyTo.disable();
+  taskTreatRequest.disable();
 }
 
 void newConnectionCallback(uint32_t nodeId) { 
@@ -82,6 +93,7 @@ void changedConnectionCallback() {
   Serial.printf("--> scaleNode: Changed connections %s\n", mesh.subConnectionJson().c_str());
  
   nodes = mesh.getNodeList();
+  int quantos = nodes.size();
 
   Serial.printf("Num nodes: %d\n", nodes.size());
   Serial.printf("Connection list:");

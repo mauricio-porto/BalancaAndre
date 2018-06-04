@@ -10,8 +10,7 @@
 // https://github.com/me-no-dev/ESPAsyncWebServer
 //************************************************************
 
-#define _TASK_TIMEOUT
-// #include <TaskScheduler.h>
+// #define _TASK_TIMEOUT   <<<===  Needs to be in the TaskScheduler.cpp and painlessMesh.h of the PainlesMesh source code
 
 #include "IPAddress.h"
 #include "painlessMesh.h"
@@ -34,21 +33,22 @@
 #define   STATION_PORT     5555
 
 // Prototypes
-void replyTo();
 void receivedCallback( const uint32_t &from, const String &msg );
 void taskReadAllCallback();
 void taskReadAllOnDisable();
 String readAll();
-String readScale(String scaleID);
-String tare(String scaleID);
-String blink(String scaleID);
-String calibrate(String scaleID, int weight);
-IPAddress getlocalIP();
+String readScale(uint32_t scaleID);
+
+String sendCommand(uint32_t scaleID, String cmd, int weight = 0);
+void sendReadRequest(uint32_t scaleID);
+
+uint32_t strToUint32(String scaleID);
+boolean isNodeReachable(uint32_t nodeId);
 
 painlessMesh  mesh;
 Scheduler     runner; // to control your personal task
-Task taskReplyTo(TASK_SECOND * 1, TASK_FOREVER, &replyTo ); // start with a one second interval
 Task taskReadAll(10 * TASK_MILLISECOND, TASK_FOREVER, &taskReadAllCallback, &runner, false, NULL, &taskReadAllOnDisable);
+uint32_t myNodeId;
 
 long num_nodes;
 
@@ -66,10 +66,11 @@ void setup() {
   mesh.init( MESH_PREFIX, MESH_PASSWORD, &runner, MESH_PORT);
   mesh.onReceive(&receivedCallback);
 
-  runner.addTask(taskReplyTo);
   runner.addTask(taskReadAll);
 
   taskReadAll.setTimeout(30 * TASK_SECOND);
+
+  myNodeId = mesh.getNodeId();
 
   // Trying the ACCESS POINT
   // =======================
@@ -93,7 +94,19 @@ void setup() {
   server.on("/read", HTTP_GET, [] (AsyncWebServerRequest *request) {
     if (request->hasArg("scale")) {
       String scaleID = request->arg("scale");
-      request->send(200, "text/json", readScale(scaleID));
+      uint32_t nodeId = strToUint32(scaleID);
+      if (myNodeId == nodeId) {
+        // FAZ AQUI E AGORA  :-)
+      } else {
+        if (isNodeReachable(nodeId)) {
+          request->send(200, "text/json", readScale(nodeId));
+        } else {
+          String msg = "Identificador ";
+          msg += scaleID;
+          msg += " não encontrado";
+          request->send(404, "text/plain", msg);
+        }
+      }
     } else {
       request->send(404, "text/plain", "Parametro scale faltando");
     }
@@ -102,20 +115,18 @@ void setup() {
   server.on("/tare", HTTP_GET, [] (AsyncWebServerRequest *request) {
     if (request->hasArg("scale")) {
       String scaleID = request->arg("scale");
-      request->send(200, "text/json", tare(scaleID));
-    } else {
-      request->send(404, "text/plain", "Parametro scale faltando");
-    }
-  });
-
-  server.on("/calibrate", HTTP_GET, [] (AsyncWebServerRequest *request) {
-    if (request->hasArg("scale")) {
-      String scaleID = request->arg("scale");
-      if (request->hasArg("weight")) {
-        long weight = request->arg("weight").toInt();
-        request->send(200, "text/json", calibrate(scaleID, weight));      
+      uint32_t nodeId = strToUint32(scaleID);
+      if (myNodeId == nodeId) {
+        // FAZ AQUI E AGORA  :-)
       } else {
-        request->send(404, "text/plain", "Parametro weight faltando");      
+        if (isNodeReachable(nodeId)) {
+          request->send(200, "text/json", sendCommand(nodeId, "tare"));
+        } else {
+          String msg = "Identificador ";
+          msg += scaleID;
+          msg += " não encontrado";
+          request->send(404, "text/plain", msg);
+        }
       }
     } else {
       request->send(404, "text/plain", "Parametro scale faltando");
@@ -125,35 +136,61 @@ void setup() {
   server.on("/blink", HTTP_GET, [] (AsyncWebServerRequest *request) {
     if (request->hasArg("scale")) {
       String scaleID = request->arg("scale");
-      request->send(200, "text/json", blink(scaleID));
+      uint32_t nodeId = strToUint32(scaleID);
+      if (myNodeId == nodeId) {
+        // FAZ AQUI E AGORA  :-)
+      } else {
+        if (isNodeReachable(nodeId)) {
+          request->send(200, "text/json", sendCommand(nodeId, "blink"));
+        } else {
+          String msg = "Identificador ";
+          msg += scaleID;
+          msg += " não encontrado";
+          request->send(404, "text/plain", msg);
+        }
+      }
     } else {
       request->send(404, "text/plain", "Parametro scale faltando");
     }
   });
 
-  //Async webserver
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(200, "text/html", "<form>Text to Broadcast<br><input type='text' name='BROADCAST'><br><br><input type='submit' value='Submit'></form>");
-    if (request->hasArg("BROADCAST")){
-      String msg = request->arg("BROADCAST");
-      mesh.sendBroadcast(msg);
-      Serial.println("Recebi " + msg);
+  server.on("/calibrate", HTTP_GET, [] (AsyncWebServerRequest *request) {
+    if (request->hasArg("scale")) {
+      String scaleID = request->arg("scale");
+      uint32_t nodeId = strToUint32(scaleID);
+      if (request->hasArg("weight")) {
+        int weight = request->arg("weight").toInt();
+        if (myNodeId == nodeId) {
+          // FAZ AQUI E AGORA  :-)
+        } else {
+          if (isNodeReachable(nodeId)) {
+            request->send(200, "text/json", sendCommand(nodeId, "calibrate", weight));
+          } else {
+            String msg = "Identificador ";
+            msg += scaleID;
+            msg += " não encontrado";
+            request->send(404, "text/plain", msg);
+          }
+        }
+      } else {
+        request->send(404, "text/plain", "Parametro weight faltando");      
+      }
+    } else {
+      request->send(404, "text/plain", "Parametro scale faltando");
     }
   });
+
   server.begin();
 
 }
 
 void loop() {
   mesh.update();
-  if(myIP != getlocalIP()){
-    myIP = getlocalIP();
-    Serial.println("My IP is " + myIP.toString());
-  }
 }
 
+// SOMENTE RECEBE RESPOSTAS DE PEDIDOS DE LEITURA. TODOS OS OUTROS COMANDOS NÃO RETORNAM RESPOSTA/VALOR
 void receivedCallback( const uint32_t &from, const String &msg ) {
-  //Serial.printf("asyncWebServerTest: Received from %u msg=%s\n", from, msg.c_str());
+  Serial.printf("scaleRootAP: Received from %u msg=%s\n", from, msg.c_str());
 }
 
 void taskReadAllCallback() {
@@ -170,17 +207,34 @@ void taskReadAllOnDisable() {
   }
 }
 
-void replyTo() {
-  
+//=====================
+
+String sendCommand(uint32_t scaleID, String cmd, int weight) {
+  String response;
+
+  mesh.sendSingle(scaleID, cmd);  // SE FOR calibrate precisa passar também o weight
+
+  StaticJsonBuffer<200> jsonBuffer;
+  JsonObject& root = jsonBuffer.createObject();
+  root["response"] = cmd;
+  root["scale"] = scaleID;
+  root["status"] = "OK";
+
+  root.prettyPrintTo(response);
+  return response;  
 }
 
 String readAll() {
   String response;
 
+  SimpleList<uint32_t> nodes = mesh.getNodeList();
+  int scales = nodes.size();
+
   StaticJsonBuffer<400> jsonBuffer;
   JsonObject& root = jsonBuffer.createObject();
   root["response"] = "readAll";
   root["status"] = "OK";
+  root["scales"] = scales;
   JsonArray& values = root.createNestedArray("values");
   DynamicJsonBuffer scaleValue(200);
   JsonObject& scaleRead = scaleValue.createObject();
@@ -201,8 +255,11 @@ String readAll() {
   return response;
 }
 
-String readScale(String scaleID) {
+String readScale(uint32_t scaleID) {
   String response;
+
+  String req = "read";
+  mesh.sendSingle(scaleID, req);  // TODO: PRECISA TRATAR RETORNO na receivedCallBack
 
   StaticJsonBuffer<200> jsonBuffer;
   JsonObject& root = jsonBuffer.createObject();
@@ -215,48 +272,30 @@ String readScale(String scaleID) {
   return response;
 }
 
-String tare(String scaleID) {
-  String response;
+uint32_t strToUint32(String scaleID) {
+   unsigned long long y = 0;
 
-  StaticJsonBuffer<200> jsonBuffer;
-  JsonObject& root = jsonBuffer.createObject();
-  root["response"] = "tare";
-  root["scale"] = scaleID;
-  root["status"] = "OK";
+  for (int i = 0; i < scaleID.length(); i++) {
+    char c = scaleID.charAt(i);
+    if (c < '0' || c > '9') break;
+    y *= 10;
+    y += (c - '0');
+  }
 
-  root.prettyPrintTo(response);
-  return response;
-
+  return (uint32_t) y;
 }
 
-String blink(String scaleID) {
-  String response;
-
-  StaticJsonBuffer<200> jsonBuffer;
-  JsonObject& root = jsonBuffer.createObject();
-  root["response"] = "blink";
-  root["scale"] = scaleID;
-  root["status"] = "OK";
-
-  root.prettyPrintTo(response);
-  return response;
-
+boolean isNodeReachable(uint32_t nodeId) {
+  boolean result = false;
+  SimpleList<uint32_t> nodes = mesh.getNodeList();
+  SimpleList<uint32_t>::iterator node = nodes.begin();
+  while (node != nodes.end()) {
+    if (nodeId == *node) {
+      result = true;
+      break;
+    }
+    node++;
+  }
+  return result;
 }
 
-String calibrate(String scaleID, int weight) {
-  String response;
-
-  StaticJsonBuffer<200> jsonBuffer;
-  JsonObject& root = jsonBuffer.createObject();
-  root["response"] = "calibrate";
-  root["scale"] = scaleID;
-  root["weight"] = weight;
-  root["status"] = "OK";
-
-  root.prettyPrintTo(response);
-  return response;  
-}
-
-IPAddress getlocalIP() {
-  return IPAddress(mesh.getStationIP().addr);
-}
