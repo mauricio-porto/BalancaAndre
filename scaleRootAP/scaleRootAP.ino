@@ -18,7 +18,7 @@ SoftwareSerial sSerial(13, 15); // GPIO13 - RX, GPIO15 - TX (aka D7, D8)
 void setup() {
   Serial.begin(115200);
   sSerial.begin(115200);
-  sSerial.setTimeout(5000);
+  //sSerial.setTimeout(5000);
 
   // Trying the ACCESS POINT
   // =======================
@@ -107,6 +107,8 @@ String processCommand(String scaleID, String cmd, int weight) {
   root.printTo(command);
 
   sSerial.print(command);
+  Serial.print("scaleRootAP: ");
+  Serial.println(command);
 
   int retries = 5;
   while (!sSerial.available() && retries-- > 0) {

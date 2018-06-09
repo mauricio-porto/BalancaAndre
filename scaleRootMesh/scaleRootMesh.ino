@@ -1,7 +1,6 @@
 // #define _TASK_TIMEOUT   <<<===  Needs to be in the TaskScheduler.cpp and painlessMesh.h of the PainlesMesh source code
 
 #include <SoftwareSerial.h>
-#include "IPAddress.h"
 #include "painlessMesh.h"
 #include <ArduinoJson.h>
 
@@ -34,7 +33,7 @@ boolean isNodeReachable(uint32_t nodeId);
 
 painlessMesh  mesh;
 Scheduler     runner; // to control your personal task
-Task taskReceiveCommand(1 * TASK_MILLISECOND, TASK_FOREVER, &taskReceiveCommandCallback);
+Task taskReceiveCommand(10 * TASK_MILLISECOND, TASK_FOREVER, &taskReceiveCommandCallback);
 Task taskReadAll(10 * TASK_MILLISECOND, TASK_FOREVER, &taskReadAllCallback, &runner, false, NULL, &taskReadAllOnDisable);
 uint32_t myNodeId;
 
@@ -58,7 +57,7 @@ void setup() {
   runner.addTask(taskReadAll);
 
   taskReceiveCommand.enable();
-  taskReadAll.setTimeout(30 * TASK_SECOND);
+  //taskReadAll.setTimeout(30 * TASK_SECOND);
 
   myNodeId = mesh.getNodeId();
 
@@ -78,7 +77,8 @@ void taskReceiveCommandCallback() {
 }
 
 void processCommand(String jsonCommand) {
-  sSerial.print("{'status':'OTE'}");
+  sSerial.print("{\"status\":\"OTE\"}");
+  Serial.println("scaleRootMesh enviou resposta.");
 }
 
 // SOMENTE RECEBE RESPOSTAS DE PEDIDOS DE LEITURA. TODOS OS OUTROS COMANDOS NÃO RETORNAM RESPOSTA/VALOR
@@ -93,11 +93,13 @@ void taskReadAllCallback() {
 }
 
 void taskReadAllOnDisable() {
+  /*
   if (taskReadAll.timedOut()) {
     Serial.println("taskReadAll has timed out");
   } else {
     Serial.println("taskReadAll has received all responses");
   }
+  */
 }
 
 //=====================
