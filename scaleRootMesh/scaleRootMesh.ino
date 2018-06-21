@@ -1,5 +1,3 @@
-// #define _TASK_TIMEOUT   <<<===  Needs to be in the TaskScheduler.cpp and painlessMesh.h of the PainlesMesh source code
-
 #include <SoftwareSerial.h>
 #include "painlessMesh.h"
 #include <ArduinoJson.h>
@@ -15,17 +13,20 @@
 #define   MESH_PASSWORD   "onePassword"
 #define   MESH_PORT       5555
 
+const unsigned int MAX_INPUT = 512;
+
 // Prototypes
 void receivedCallback( const uint32_t &from, const String &msg );
 void taskReadAllCallback();
 void taskReadAllOnDisable();
-void processCommand(String jsonCommand);
-void taskReceiveCommandCallback();
+void processRequest(String jsonCommand);
+void taskReceiveRequestCallback();
+void processIncomingByte (const byte inByte);
 
 String readAll();
 String readScale(uint32_t scaleID);
 
-String sendCommand(uint32_t scaleID, String cmd, int weight = 0);
+void sendCommand(uint32_t scaleID, String cmd, int weight = 0);
 void sendReadRequest(uint32_t scaleID);
 
 uint32_t strToUint32(String scaleID);
@@ -33,24 +34,29 @@ boolean isNodeReachable(uint32_t nodeId);
 
 painlessMesh  mesh;
 Scheduler     runner; // to control your personal task
-Task taskReceiveCommand(10 * TASK_MILLISECOND, TASK_FOREVER, &taskReceiveCommandCallback);
+Task taskReceiveCommand(100 * TASK_MILLISECOND, TASK_FOREVER, &taskReceiveRequestCallback);
 Task taskReadAll(10 * TASK_MILLISECOND, TASK_FOREVER, &taskReadAllCallback, &runner, false, NULL, &taskReadAllOnDisable);
 uint32_t myNodeId;
 
 long num_nodes;
 
-SoftwareSerial sSerial(13, 15); // GPIO13 - RX, GPIO15 - TX (aka D7, D8)
+SoftwareSerial sSerial(13, 15, false, MAX_INPUT); // GPIO13 - RX, GPIO15 - TX (aka D7, D8)
 
 void setup() {
   Serial.begin(115200);
-  sSerial.begin(115200);
+
+  // A SoftwareSerial em ESP8266 junto com Mesh não suporta velocidade alta, por isso 38400
+  sSerial.begin(38400);
+  while(sSerial.available()) sSerial.read();  // Clear buffer
 
   mesh.setDebugMsgTypes( ERROR | DEBUG | STARTUP | CONNECTION );  // set before init() so that you can see startup messages
-  mesh.setDebugMsgTypes( ERROR | MESH_STATUS | CONNECTION | SYNC | COMMUNICATION | GENERAL | MSG_TYPES | REMOTE ); // all types on
+  //mesh.setDebugMsgTypes( ERROR | MESH_STATUS | CONNECTION | SYNC | COMMUNICATION | GENERAL | MSG_TYPES | REMOTE ); // all types on
+  //mesh.setDebugMsgTypes( ERROR );
 
   // Channel set to 1. Make sure to use the same channel for your mesh and for you other
   // network (STATION_SSID)
   mesh.init( MESH_PREFIX, MESH_PASSWORD, &runner, MESH_PORT);
+  mesh.setRoot();
   mesh.onReceive(&receivedCallback);
 
   runner.addTask(taskReceiveCommand);
@@ -60,6 +66,7 @@ void setup() {
   //taskReadAll.setTimeout(30 * TASK_SECOND);
 
   myNodeId = mesh.getNodeId();
+  Serial.printf("My nodeId is %u\n", myNodeId);
 
 }
 
@@ -68,17 +75,72 @@ void loop() {
   mesh.update();
 }
 
-void taskReceiveCommandCallback() {
-  if (sSerial.available()) {
-    String jsonCommand = sSerial.readString();
-    Serial.println(jsonCommand);
-    processCommand(jsonCommand);
-  }
+void taskReceiveRequestCallback() {
+  while (sSerial.available()) processIncomingByte(sSerial.read());
 }
 
-void processCommand(String jsonCommand) {
-  sSerial.print("{\"status\":\"OTE\"}");
-  Serial.println("scaleRootMesh enviou resposta.");
+void processRequest(String jsonCommand) {
+  String response;
+
+Serial.printf("Request received: %s\n", jsonCommand.c_str());
+
+  DynamicJsonBuffer jsonBuffer(MAX_INPUT);
+  JsonObject& rcvdJson = jsonBuffer.parseObject(jsonCommand);
+  if (!rcvdJson.success()) {
+    Serial.println("parseObject() failed");
+    sSerial.flush();
+    sSerial.println("{\"status\":\"Failed\",\"reason\":\"parseObject() failed\"}");
+    return;
+  }
+
+  String cmd = rcvdJson["command"];
+  String scaleId = rcvdJson["scaleId"];
+  uint32_t nodeId = strToUint32(scaleId);
+  int weight = rcvdJson["weight"].as<int>();
+
+  JsonObject& replJson = jsonBuffer.createObject();
+  replJson["command"] = cmd;
+  replJson["scaleId"] = scaleId;
+
+  boolean reached = (myNodeId == nodeId) || isNodeReachable(nodeId);
+  if (!reached) {
+    replJson["status"] = "FALHOU: identificador nao encontrado";
+    replJson.printTo(response);
+    Serial.printf("Respondendo %s\n", response.c_str());
+    sSerial.flush();
+    sSerial.println(response);
+    return;
+  }
+
+  replJson["status"] = "OK";
+  if (myNodeId == nodeId) {         // FAZ AQUI E AGORA  :-)
+    if (String("read").equals(cmd)) {
+      replJson["value"] = 6.9;      // lê valor da balança local
+    } else {
+      // invoca o comando para a balança
+    }
+  } else {
+    if (String("read").equals(cmd)) { // PRECISA ENVIAR E AGUARDAR RESPOSTA (receiveCallback)
+    } else {                          // APENAS ENVIA
+      sendCommand(nodeId, cmd, weight);
+    }    
+  }
+
+  replJson.printTo(response);
+  sSerial.flush();
+  sSerial.println(response);
+
+  Serial.print("scaleRootMesh enviou resposta: ");
+  Serial.println(response);
+}
+
+void sendCommand(uint32_t scaleId, String cmd, int weight) {
+  String msg = cmd;
+  if (weight > 0) {
+    msg += ":";
+    msg += weight;
+  }
+  mesh.sendSingle(scaleId, msg);
 }
 
 // SOMENTE RECEBE RESPOSTAS DE PEDIDOS DE LEITURA. TODOS OS OUTROS COMANDOS NÃO RETORNAM RESPOSTA/VALOR
@@ -110,7 +172,7 @@ String readScale(uint32_t scaleID) {
   String req = "read";
   mesh.sendSingle(scaleID, req);  // TODO: PRECISA TRATAR RETORNO na receivedCallBack
 
-  StaticJsonBuffer<200> jsonBuffer;
+  StaticJsonBuffer<256> jsonBuffer;
   JsonObject& root = jsonBuffer.createObject();
   root["response"] = "read";
   root["scale"] = scaleID;
@@ -146,5 +208,25 @@ boolean isNodeReachable(uint32_t nodeId) {
     node++;
   }
   return result;
+}
+
+void processIncomingByte (const byte inByte) {
+  static char input_line [MAX_INPUT];
+  static unsigned int input_pos = 0;
+
+  switch (inByte) {
+    case '\n':   // end of text
+      input_line [input_pos] = 0;  // terminating null byte
+      processRequest(String(input_line));
+      input_pos = 0;  
+      break;
+    case '\r':   // discard carriage return
+      break;
+    default:
+      // keep adding if not full ... allow for terminating null byte
+      if (input_pos < (MAX_INPUT - 1))
+        input_line [input_pos++] = inByte;
+      break;
+  }
 }
 

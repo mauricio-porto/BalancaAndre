@@ -6,19 +6,25 @@
 #define   STATION_PASSWORD "andrepayao"
 #define   STATION_PORT     5555
 
+const unsigned int MAX_INPUT = 512;
+long reqNumber = 0;
+
 // Prototypes
 String processCommand(String scaleID, String cmd, int weight = 0);
+String readString(SoftwareSerial *sSer);
 
 ESP8266WebServer server(80);
 IPAddress myIP(0,0,0,0);
 IPAddress myAPIP(0,0,0,0);
 
-SoftwareSerial sSerial(13, 15); // GPIO13 - RX, GPIO15 - TX (aka D7, D8)
+SoftwareSerial sSerial(13, 15, false, MAX_INPUT); // GPIO13 - RX, GPIO15 - TX (aka D7, D8)
 
 void setup() {
   Serial.begin(115200);
-  sSerial.begin(115200);
-  //sSerial.setTimeout(5000);
+
+  // A SoftwareSerial em ESP8266 junto com Mesh não suporta velocidade alta, por isso 38400
+  sSerial.begin(38400);
+  while(sSerial.available()) sSerial.read();  // Clear buffer
 
   // Trying the ACCESS POINT
   // =======================
@@ -53,7 +59,6 @@ void setup() {
   });
 
   server.on("/tare", HTTP_GET, [] () {
-    Serial.println("\nChegou requisicao de tare...");
     if (server.hasArg("scale")) {
       String scaleId = server.arg("scale");
       server.send(200, "text/json", processCommand(scaleId, "tare"));
@@ -86,6 +91,8 @@ void setup() {
   });
 
   server.begin();
+  delay(3333);
+  processCommand("9876543210", "read", 0); // Apenas para "limpar" a garganta ;-) Por razão desconhecida, o primeiro buffer fica corrompido.
 
 }
 
@@ -98,15 +105,16 @@ void loop() {
 String processCommand(String scaleID, String cmd, int weight) {
   String command;
 
-  StaticJsonBuffer<200> jsonBuffer;
+  DynamicJsonBuffer jsonBuffer(MAX_INPUT);
   JsonObject& root = jsonBuffer.createObject();
   root["command"] = cmd;
-  root["scale"] = scaleID;
+  root["scaleId"] = scaleID;
   root["weight"] = weight;
 
   root.printTo(command);
 
-  sSerial.print(command);
+  sSerial.flush();
+  sSerial.println(command);
   Serial.print("scaleRootAP: ");
   Serial.println(command);
 
@@ -115,9 +123,11 @@ String processCommand(String scaleID, String cmd, int weight) {
     delay(1000);
   }
   if (sSerial.available()) {
-    return sSerial.readString();
+    String response = readString(&sSerial);
+    Serial.printf("Recebido pela sSerial: %s\n", response.c_str());
+    return response;
   } else {
-    return "{'status':'Failed, timeout.'}";
+    return "{\"status\":\"Failed, timeout.\"}";
   }
 
 }
@@ -125,7 +135,7 @@ String processCommand(String scaleID, String cmd, int weight) {
 String readAll() {
   String response;
 
-  StaticJsonBuffer<400> jsonBuffer;
+  DynamicJsonBuffer jsonBuffer(MAX_INPUT);
   JsonObject& root = jsonBuffer.createObject();
   root["response"] = "readAll";
   root["status"] = "OK";
@@ -148,5 +158,32 @@ String readAll() {
   //root.printTo(response);
   root.prettyPrintTo(response);
   return response;
+}
+
+String readString(SoftwareSerial *sSer) {
+  String response;
+
+  static char input_line [MAX_INPUT];
+  static unsigned int input_pos = 0;
+
+  boolean eol = false;
+  while(sSer->available() && !eol) {
+    byte inByte = sSer->read();
+    switch (inByte) {
+      case '\n':   // end of text
+        input_line [input_pos] = 0;  // terminating null byte
+        input_pos = 0;
+        eol = true;
+        break;
+      case '\r':   // discard carriage return
+        break;
+      default:
+        // keep adding if not full ... allow for terminating null byte
+        if (input_pos < (MAX_INPUT - 1))
+          input_line [input_pos++] = inByte;
+        break;
+    }
+  }
+  return String(input_line);
 }
 

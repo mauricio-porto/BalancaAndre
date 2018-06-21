@@ -6,13 +6,14 @@
 
 // Prototypes
 void treatRequest();
+void showNodeList();
 void receivedCallback(uint32_t from, String & msg);
 void newConnectionCallback(uint32_t nodeId);
 void changedConnectionCallback(); 
 void nodeTimeAdjustedCallback(int32_t offset); 
 void delayReceivedCallback(uint32_t from, int32_t delay);
 
-Scheduler     userScheduler;
+Scheduler     runner;
 
 painlessMesh  mesh;
 
@@ -23,14 +24,15 @@ String rcvdMsg;
 String replyMsg;
 uint32_t destination;
 
-Task taskTreatRequest(500 * TASK_MILLISECOND, TASK_FOREVER, &treatRequest ); // start with a one second interval
+Task taskTreatRequest(100 * TASK_MILLISECOND, TASK_FOREVER, &treatRequest ); // start with a one second interval
 
 void setup() {
   Serial.begin(115200);
 
   mesh.setDebugMsgTypes(ERROR | DEBUG | STARTUP| CONNECTION);  // set before init() so that you can see startup messages
 
-  mesh.init(MESH_SSID, MESH_PASSWORD, &userScheduler, MESH_PORT);
+  mesh.init(MESH_SSID, MESH_PASSWORD, &runner, MESH_PORT);
+  mesh.setContainsRoot();
   mesh.onReceive(&receivedCallback);
   mesh.onNewConnection(&newConnectionCallback);
   mesh.onChangedConnections(&changedConnectionCallback);
@@ -39,12 +41,12 @@ void setup() {
 
   Serial.printf("\n\nMy nodeID is %u\n\n", mesh.getNodeId());
 
-  userScheduler.addTask(taskTreatRequest);
+  runner.addTask(taskTreatRequest);
 
 }
 
 void loop() {
-  userScheduler.execute();
+  runner.execute();
   mesh.update();
 }
 
@@ -86,14 +88,25 @@ void treatRequest() {
 }
 
 void newConnectionCallback(uint32_t nodeId) { 
-  Serial.printf("--> scaleNode: New Connection, nodeId = %u\n", nodeId);
+  Serial.printf("--> scaleNodeMesh: New Connection, nodeId = %u\n", nodeId);
 }
 
 void changedConnectionCallback() {
-  Serial.printf("--> scaleNode: Changed connections %s\n", mesh.subConnectionJson().c_str());
- 
+  Serial.printf("--> scaleNodeMesh: Changed connections %s\n", mesh.subConnectionJson().c_str());
+  //showNodeList();
+  calc_delay = true;
+}
+
+void nodeTimeAdjustedCallback(int32_t offset) {
+  Serial.printf("--> scaleNodeMesh: Adjusted time %u. Offset = %d\n", mesh.getNodeTime(), offset);
+}
+
+void delayReceivedCallback(uint32_t from, int32_t delay) {
+  Serial.printf("--> scaleNodeMesh: Delay to node %u is %d us\n", from, delay);
+}
+
+void showNodeList() {
   nodes = mesh.getNodeList();
-  int quantos = nodes.size();
 
   Serial.printf("Num nodes: %d\n", nodes.size());
   Serial.printf("Connection list:");
@@ -103,15 +116,6 @@ void changedConnectionCallback() {
     Serial.printf(" %u", *node);
     node++;
   }
-  Serial.println();
-  calc_delay = true;
-}
-
-void nodeTimeAdjustedCallback(int32_t offset) {
-  Serial.printf("--> scaleNode: Adjusted time %u. Offset = %d\n", mesh.getNodeTime(), offset);
-}
-
-void delayReceivedCallback(uint32_t from, int32_t delay) {
-  Serial.printf("--> scaleNode: Delay to node %u is %d us\n", from, delay);
+  Serial.println();  
 }
 
