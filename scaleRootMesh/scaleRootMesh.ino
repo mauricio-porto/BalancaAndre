@@ -12,6 +12,7 @@
 #define   MESH_PREFIX     "meshOne"
 #define   MESH_PASSWORD   "onePassword"
 #define   MESH_PORT       5555
+#define   MESH_CHANNEL    4
 
 const unsigned int MAX_INPUT = 512;
 
@@ -22,6 +23,8 @@ void taskReadAllOnDisable();
 void processRequest(String jsonCommand);
 void taskReceiveRequestCallback();
 void processIncomingByte (const byte inByte);
+String serializeJson();
+String serializeNodeList();
 
 String readAll();
 String readScale(uint32_t scaleID);
@@ -36,9 +39,22 @@ painlessMesh  mesh;
 Scheduler     runner; // to control your personal task
 Task taskReceiveCommand(100 * TASK_MILLISECOND, TASK_FOREVER, &taskReceiveRequestCallback);
 Task taskReadAll(10 * TASK_MILLISECOND, TASK_FOREVER, &taskReadAllCallback, &runner, false, NULL, &taskReadAllOnDisable);
+
 uint32_t myNodeId;
 
+SimpleList<uint32_t> nodes;
 long num_nodes;
+
+boolean waitingResponse;
+
+typedef struct {
+  String cmd;
+  String scaleId;
+  String status;
+  int value;
+} replyType;
+
+replyType reply;
 
 SoftwareSerial sSerial(13, 15, false, MAX_INPUT); // GPIO13 - RX, GPIO15 - TX (aka D7, D8)
 
@@ -49,14 +65,13 @@ void setup() {
   sSerial.begin(38400);
   while(sSerial.available()) sSerial.read();  // Clear buffer
 
-  mesh.setDebugMsgTypes( ERROR | DEBUG | STARTUP | CONNECTION );  // set before init() so that you can see startup messages
-  //mesh.setDebugMsgTypes( ERROR | MESH_STATUS | CONNECTION | SYNC | COMMUNICATION | GENERAL | MSG_TYPES | REMOTE ); // all types on
+  //mesh.setDebugMsgTypes( ERROR | DEBUG | STARTUP | CONNECTION );  // set before init() so that you can see startup messages
+  mesh.setDebugMsgTypes( ERROR | MESH_STATUS | CONNECTION | SYNC | COMMUNICATION | MSG_TYPES | REMOTE ); // all types on
   //mesh.setDebugMsgTypes( ERROR );
 
-  // Channel set to 1. Make sure to use the same channel for your mesh and for you other
-  // network (STATION_SSID)
-  mesh.init( MESH_PREFIX, MESH_PASSWORD, &runner, MESH_PORT);
+  mesh.init( MESH_PREFIX, MESH_PASSWORD, &runner, MESH_PORT, WIFI_AP_STA, MESH_CHANNEL);
   mesh.setRoot();
+  //mesh.setContainsRoot();
   mesh.onReceive(&receivedCallback);
 
   runner.addTask(taskReceiveCommand);
@@ -66,8 +81,8 @@ void setup() {
   //taskReadAll.setTimeout(30 * TASK_SECOND);
 
   myNodeId = mesh.getNodeId();
-  Serial.printf("My nodeId is %u\n", myNodeId);
 
+  //ESP.deepSleep(5e6);
 }
 
 void loop() {
@@ -80,11 +95,12 @@ void taskReceiveRequestCallback() {
 }
 
 void processRequest(String jsonCommand) {
-  String response;
+
+  waitingResponse = false;
 
 Serial.printf("Request received: %s\n", jsonCommand.c_str());
 
-  DynamicJsonBuffer jsonBuffer(MAX_INPUT);
+  StaticJsonBuffer<MAX_INPUT> jsonBuffer;
   JsonObject& rcvdJson = jsonBuffer.parseObject(jsonCommand);
   if (!rcvdJson.success()) {
     Serial.println("parseObject() failed");
@@ -93,45 +109,48 @@ Serial.printf("Request received: %s\n", jsonCommand.c_str());
     return;
   }
 
-  String cmd = rcvdJson["command"];
-  String scaleId = rcvdJson["scaleId"];
-  uint32_t nodeId = strToUint32(scaleId);
-  int weight = rcvdJson["weight"].as<int>();
+  reply.cmd = rcvdJson["command"].as<String>();
 
-  JsonObject& replJson = jsonBuffer.createObject();
-  replJson["command"] = cmd;
-  replJson["scaleId"] = scaleId;
-
-  boolean reached = (myNodeId == nodeId) || isNodeReachable(nodeId);
-  if (!reached) {
-    replJson["status"] = "FALHOU: identificador nao encontrado";
-    replJson.printTo(response);
-    Serial.printf("Respondendo %s\n", response.c_str());
+  if (String("list").equals(reply.cmd)) {    
     sSerial.flush();
-    sSerial.println(response);
+    sSerial.println(serializeNodeList());
     return;
   }
 
-  replJson["status"] = "OK";
+  reply.scaleId = rcvdJson["scaleId"].as<String>();
+  reply.value = -1;                                // MENOS 1 significa value não usado
+
+  uint32_t nodeId = strToUint32(reply.scaleId);
+  int weight = rcvdJson["weight"].as<int>();
+
+  boolean reached = (myNodeId == nodeId) || isNodeReachable(nodeId);
+  if (!reached) {
+    reply.status = "FALHOU: identificador nao encontrado";
+    sSerial.flush();
+    sSerial.println(serializeJson());
+    return;
+  }
+
+  reply.status = "OK";
   if (myNodeId == nodeId) {         // FAZ AQUI E AGORA  :-)
-    if (String("read").equals(cmd)) {
-      replJson["value"] = 6.9;      // lê valor da balança local
+    if (String("read").equals(reply.cmd)) {
+      reply.value = 69;      // lê valor da balança local
     } else {
       // invoca o comando para a balança
     }
   } else {
-    if (String("read").equals(cmd)) { // PRECISA ENVIAR E AGUARDAR RESPOSTA (receiveCallback)
-    } else {                          // APENAS ENVIA
-      sendCommand(nodeId, cmd, weight);
-    }    
+    waitingResponse = (String("read").equals(reply.cmd));
+    sendCommand(nodeId, reply.cmd, weight);
   }
 
-  replJson.printTo(response);
-  sSerial.flush();
-  sSerial.println(response);
-
-  Serial.print("scaleRootMesh enviou resposta: ");
-  Serial.println(response);
+  if (!waitingResponse) {
+    String resp = serializeJson();
+    sSerial.flush();
+    sSerial.println(resp);
+  
+    Serial.print("scaleRootMesh enviou resposta: ");
+    Serial.println(resp);
+  }
 }
 
 void sendCommand(uint32_t scaleId, String cmd, int weight) {
@@ -146,6 +165,11 @@ void sendCommand(uint32_t scaleId, String cmd, int weight) {
 // SOMENTE RECEBE RESPOSTAS DE PEDIDOS DE LEITURA. TODOS OS OUTROS COMANDOS NÃO RETORNAM RESPOSTA/VALOR
 void receivedCallback( const uint32_t &from, const String &msg ) {
   Serial.printf("scaleRootMesh: Received from %u msg=%s\n", from, msg.c_str());
+  if (waitingResponse) {
+    reply.value = msg.toInt();
+    sSerial.flush();
+    sSerial.println(serializeJson());
+  }
 }
 
 void taskReadAllCallback() {
@@ -165,6 +189,42 @@ void taskReadAllOnDisable() {
 }
 
 //=====================
+
+String serializeJson() {
+  String serializedJson;
+
+  StaticJsonBuffer<MAX_INPUT> jsonBuffer;
+  JsonObject& jsonObj = jsonBuffer.createObject();
+
+  jsonObj["cmd"] = reply.cmd;
+  jsonObj["scaleId"] = reply.scaleId;
+  jsonObj["status"] = reply.status;
+  if (reply.value > -1) {
+    jsonObj["value"] = reply.value;
+  }
+
+  jsonObj.printTo(serializedJson);
+  return serializedJson;
+}
+
+String serializeNodeList() {
+  String serializedJson;
+
+  StaticJsonBuffer<MAX_INPUT> jsonBuffer;
+  JsonObject& jsonObj = jsonBuffer.createObject();
+
+  nodes = mesh.getNodeList();
+  jsonObj["numNodes"] = nodes.size();
+  JsonArray& nodeList = jsonObj.createNestedArray("nodeList");
+  SimpleList<uint32_t>::iterator node = nodes.begin();
+  while (node != nodes.end()) {
+    nodeList.add(*node);
+    node++;
+  }
+
+  jsonObj.printTo(serializedJson);
+  return serializedJson;
+}
 
 String readScale(uint32_t scaleID) {
   String response;
@@ -198,7 +258,7 @@ uint32_t strToUint32(String scaleID) {
 
 boolean isNodeReachable(uint32_t nodeId) {
   boolean result = false;
-  SimpleList<uint32_t> nodes = mesh.getNodeList();
+  nodes = mesh.getNodeList();
   SimpleList<uint32_t>::iterator node = nodes.begin();
   while (node != nodes.end()) {
     if (nodeId == *node) {

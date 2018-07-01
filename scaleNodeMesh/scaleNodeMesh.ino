@@ -1,17 +1,22 @@
 #include <painlessMesh.h>
 
+#define   LED             2
+#define   BLINK_DURATION  1000  // milliseconds LED is on for
+
 #define   MESH_SSID       "meshOne"
 #define   MESH_PASSWORD   "onePassword"
 #define   MESH_PORT       5555
+#define   MESH_CHANNEL    4
 
 // Prototypes
 void treatRequest();
-void showNodeList();
 void receivedCallback(uint32_t from, String & msg);
 void newConnectionCallback(uint32_t nodeId);
 void changedConnectionCallback(); 
 void nodeTimeAdjustedCallback(int32_t offset); 
 void delayReceivedCallback(uint32_t from, int32_t delay);
+void blinkOn();
+void blinkOff();
 
 Scheduler     runner;
 
@@ -24,14 +29,18 @@ String rcvdMsg;
 String replyMsg;
 uint32_t destination;
 
+Task taskBlinkControl(1 * TASK_SECOND, TASK_FOREVER, &blinkOn);
 Task taskTreatRequest(100 * TASK_MILLISECOND, TASK_FOREVER, &treatRequest ); // start with a one second interval
 
 void setup() {
   Serial.begin(115200);
 
+  pinMode(LED, OUTPUT);
+  digitalWrite(LED, true);
+
   mesh.setDebugMsgTypes(ERROR | DEBUG | STARTUP| CONNECTION);  // set before init() so that you can see startup messages
 
-  mesh.init(MESH_SSID, MESH_PASSWORD, &runner, MESH_PORT);
+  mesh.init(MESH_SSID, MESH_PASSWORD, &runner, MESH_PORT, WIFI_AP_STA, MESH_CHANNEL);
   mesh.setContainsRoot();
   mesh.onReceive(&receivedCallback);
   mesh.onNewConnection(&newConnectionCallback);
@@ -42,6 +51,7 @@ void setup() {
   Serial.printf("\n\nMy nodeID is %u\n\n", mesh.getNodeId());
 
   runner.addTask(taskTreatRequest);
+  runner.addTask(taskBlinkControl);
 
 }
 
@@ -56,22 +66,25 @@ void receivedCallback(uint32_t from, String & msg) {
   rcvdMsg = msg.c_str();
 
   taskTreatRequest.enable();
+  digitalWrite(LED, true);
 }
 
 // Apenas responde a pedidos de leitura da balanca
 // Todas os outros são comandos que não exigem retorno/resposta
 void treatRequest() {
 
+  taskTreatRequest.disable();
+
   // DEVE TRATAR A MENSAGEM RECEBIDA E DEPOIS RETORNAR RESPOSTA
   if (rcvdMsg.indexOf("read") >= 0) {  //read?scale=987654321
     //lê valor e retorna send.single(from, PESO);
-    replyMsg = "56";
+    replyMsg = "345";
     mesh.sendSingle(destination, replyMsg);
-    Serial.printf("--> scaleNode: Sending message: %s\n", replyMsg.c_str());
+    //Serial.printf("--> scaleNodeMesh: Sending message: %s\n", replyMsg.c_str());
   } else if (rcvdMsg.indexOf("tare") >= 0) {
     //
   } else if (rcvdMsg.indexOf("blink") >= 0) {
-    
+    taskBlinkControl.enable();
   } else if (rcvdMsg.indexOf("calibrate") >= 0) {
     
   }
@@ -84,7 +97,7 @@ void treatRequest() {
     }
     calc_delay = false;
   }
-  taskTreatRequest.disable();
+  digitalWrite(LED, false);
 }
 
 void newConnectionCallback(uint32_t nodeId) { 
@@ -93,7 +106,6 @@ void newConnectionCallback(uint32_t nodeId) {
 
 void changedConnectionCallback() {
   Serial.printf("--> scaleNodeMesh: Changed connections %s\n", mesh.subConnectionJson().c_str());
-  //showNodeList();
   calc_delay = true;
 }
 
@@ -105,17 +117,14 @@ void delayReceivedCallback(uint32_t from, int32_t delay) {
   Serial.printf("--> scaleNodeMesh: Delay to node %u is %d us\n", from, delay);
 }
 
-void showNodeList() {
-  nodes = mesh.getNodeList();
+void blinkOn() {
+  digitalWrite(LED, false);
+  taskBlinkControl.setCallback(&blinkOff);
+  taskBlinkControl.delay(BLINK_DURATION);
+}
 
-  Serial.printf("Num nodes: %d\n", nodes.size());
-  Serial.printf("Connection list:");
-
-  SimpleList<uint32_t>::iterator node = nodes.begin();
-  while (node != nodes.end()) {
-    Serial.printf(" %u", *node);
-    node++;
-  }
-  Serial.println();  
+void blinkOff() {
+  digitalWrite(LED, true);
+  taskBlinkControl.disable();
 }
 

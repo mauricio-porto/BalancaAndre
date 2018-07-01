@@ -25,7 +25,7 @@ void setup() {
   // A SoftwareSerial em ESP8266 junto com Mesh não suporta velocidade alta, por isso 38400
   sSerial.begin(38400);
   while(sSerial.available()) sSerial.read();  // Clear buffer
-
+  
   // Trying the ACCESS POINT
   // =======================
 
@@ -47,6 +47,10 @@ void setup() {
 
   server.on("/readAll", HTTP_GET, [] () {
     server.send(200, "text/json", readAll());
+  });
+
+  server.on("/list", HTTP_GET, [] () {
+    server.send(200, "text/json", processCommand("", "list"));
   });
 
   server.on("/read", HTTP_GET, [] () {
