@@ -2,17 +2,22 @@
 #include <ESP8266WebServer.h>
 #include <ESP8266HTTPClient.h>
 #include <TaskScheduler.h>
-
+#include <HX711.h>
 
 #define   MAX_LENGTH      200
 #define   LED             2
 #define   BLINK_DURATION  500  // milliseconds LED is on for
-#define   ANDROID_IP      0xAA
+#define   ANDROID_IP      102  // 0xAA
+
+#define   HX711_DOUT      12  // HX711.DOUT  - pin GPIO12 aka D6
+#define   HX711_SCK       14  // HX711.PD_SCK  - pin GPIO14 aka D5
+
+float scale_fix = -715.12f;   // this value is obtained by calibrating the scale with known weights; see the README for details
 
 // Prototypes
 int readScale();
-void tareScale();
 void calibrateScale(int weight);
+void resetScale();
 String serializeJson();
 void blinkOn();
 void blinkOff();
@@ -47,6 +52,9 @@ Task taskRegisterScale(5 * TASK_SECOND, TASK_FOREVER, &registerScale);
 
 ESP8266WebServer server(80);
 HTTPClient httpClient;
+HX711 scale;
+
+boolean waitingCalibration;
 
 void setup() {
 
@@ -54,6 +62,8 @@ void setup() {
 
   pinMode(LED, OUTPUT);
   digitalWrite(LED, true);
+
+  scale.begin(HX711_DOUT, HX711_SCK);     // D6, D5
 
   // Connect to WiFi network
   WiFi.mode(WIFI_STA);
@@ -81,19 +91,34 @@ void setup() {
   androidIP[3] = ANDROID_IP;
 
   server.on("/", HTTP_GET, [] () {
+    if (waitingCalibration) {
+      resetScale();
+    }
     server.send(404, "text/plain", "Nada aqui...");
   });
 
   server.on("/read", HTTP_GET, [] () {
+    if (waitingCalibration) {
+      resetScale();
+    }
+
     reply.cmd = "read";
     reply.scaleId = myId;
     reply.status = "OK";
     reply.value = readScale();
+    reply.value = reply.value >= 0?reply.value:0;
     server.send(200, "text/json", serializeJson());
   });
 
   server.on("/tare", HTTP_GET, [] () {
-    tareScale();
+    if (waitingCalibration) {
+      resetScale();
+    }
+
+    scale.power_up();
+    scale.tare();
+    scale.power_down();
+
     reply.cmd = "tare";
     reply.scaleId = myId;
     reply.status = "OK";
@@ -102,6 +127,9 @@ void setup() {
   });
 
   server.on("/blink", HTTP_GET, [] () {
+    if (waitingCalibration) {
+      resetScale();
+    }
     taskBlinkControl.enable();
     reply.cmd = "blink";
     reply.scaleId = myId;
@@ -110,17 +138,36 @@ void setup() {
     server.send(200, "text/json", serializeJson());
   });
 
+  server.on("/prepareCalibration", HTTP_GET, [] () {
+
+    scale.power_up();
+    scale.set_scale();
+    scale.tare();
+    scale.power_down();
+    waitingCalibration = true;
+
+    reply.cmd = "prepareCalibration";
+    reply.scaleId = myId;
+    reply.status = "OK, coloque o peso conhecido na balanca e chame calibrate a seguir";
+    reply.value = -1;
+    server.send(200, "text/json", serializeJson());
+  });
+
   server.on("/calibrate", HTTP_GET, [] () {
-    if (server.hasArg("weight")) {
-      int weight = server.arg("weight").toInt();
-      calibrateScale(weight);
-      reply.cmd = "calibrate";
-      reply.scaleId = myId;
-      reply.status = "OK";
-      reply.value = -1;
-      server.send(200, "text/json", serializeJson());
+    if (waitingCalibration) {
+      if (server.hasArg("weight")) {
+        int weight = server.arg("weight").toInt();
+        calibrateScale(weight);
+        reply.cmd = "calibrate";
+        reply.scaleId = myId;
+        reply.status = "OK";
+        reply.value = -1;
+        server.send(200, "text/json", serializeJson());
+      } else {
+        server.send(404, "text/plain", "Parametro weight faltando");      
+      }
     } else {
-      server.send(404, "text/plain", "Parametro weight faltando");      
+        server.send(404, "text/plain", "Precisa chamar prepareCalibration antes");
     }
   });
 
@@ -130,8 +177,12 @@ void setup() {
   runner.addTask(taskCheckWifi);
   runner.addTask(taskRegisterScale);
 
+  scale.set_scale(scale_fix);
+  scale.tare();                                     // A BALANÇA DEVE ESTAR VAZIA, LIMPA
+  scale.power_down();
+
   taskCheckWifi.enable();
-  // taskRegisterScale.enable();                    DESCOMENTAR QUANDO TIVER O SERVIÇO ANDROID PRONTO  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+  //taskRegisterScale.enable();                    // DESCOMENTAR QUANDO TIVER O SERVIÇO ANDROID PRONTO  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 }
 
 void loop() {
@@ -141,15 +192,35 @@ void loop() {
 
 int readScale() {
   int value = 0;
+
+  scale.power_up();
+  delay(500);
+  float w = scale.get_units(10);
+  value = (int) (w * 10.f);
+  scale.power_down();
+
   return value;
 }
 
-void tareScale() {
-  
+void calibrateScale(int weight) {
+
+  float w = (float) weight / 10.f;
+
+  scale.power_up();
+  float u = scale.get_units(10);
+  scale_fix = u / w;
+  scale.set_scale(scale_fix);
+  scale.power_down();
+  waitingCalibration = false;
+
 }
 
-void calibrateScale(int weight) {
-  
+void resetScale() {
+  scale.power_up();
+  scale.set_scale(scale_fix);
+  scale.tare();
+  scale.power_down();  
+  waitingCalibration = false;
 }
 
 //=====================
@@ -199,7 +270,7 @@ void registerScale() {
   String strAndroidIP = String(androidIP[0]) + '.' + String(androidIP[1]) + '.' + String(androidIP[2]) + '.' + String(androidIP[3]);
   String urlAndroid = "http://";
   urlAndroid += strAndroidIP;
-  urlAndroid += "/registerScale";
+  urlAndroid += ":8000/registerScale";
   httpClient.begin(urlAndroid);
   httpClient.addHeader("Content-Type", "text/json");
   String json2send = "{\"scaleId\":\"";
@@ -211,6 +282,7 @@ void registerScale() {
   isRegistered = 200 == httpCode;
   if(isRegistered) {
     taskRegisterScale.disable();
+    Serial.println("\n\nBalanca registrada!\n\n");
   }
 
 }
