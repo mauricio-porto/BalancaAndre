@@ -5,14 +5,14 @@
 #include <HX711.h>
 
 #define   MAX_LENGTH      200
-#define   LED             2
+#define   LED             13   // pin GPIO13 aka D7
 #define   BLINK_DURATION  500  // milliseconds LED is on for
-#define   ANDROID_IP      102  // 0xAA
+#define   ANDROID_IP      170  // 0xAA
 
 #define   HX711_DOUT      12  // HX711.DOUT  - pin GPIO12 aka D6
 #define   HX711_SCK       14  // HX711.PD_SCK  - pin GPIO14 aka D5
 
-float scale_fix = -715.12f;   // this value is obtained by calibrating the scale with known weights; see the README for details
+float scale_fix = -11800.f;   // this value is obtained by calibrating the scale with known weights; see the README for details
 
 // Prototypes
 int readScale();
@@ -61,7 +61,7 @@ void setup() {
   Serial.begin(115200);
 
   pinMode(LED, OUTPUT);
-  digitalWrite(LED, true);
+  digitalWrite(LED, false);
 
   scale.begin(HX711_DOUT, HX711_SCK);     // D6, D5
 
@@ -173,6 +173,8 @@ void setup() {
 
   server.begin();
 
+  digitalWrite(LED, true); delay(BLINK_DURATION); digitalWrite(LED, false); delay(BLINK_DURATION); digitalWrite(LED, true); delay(BLINK_DURATION); digitalWrite(LED, false);
+
   runner.addTask(taskBlinkControl);
   runner.addTask(taskCheckWifi);
   runner.addTask(taskRegisterScale);
@@ -182,7 +184,7 @@ void setup() {
   scale.power_down();
 
   taskCheckWifi.enable();
-  //taskRegisterScale.enable();                    // DESCOMENTAR QUANDO TIVER O SERVIÇO ANDROID PRONTO  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+  taskRegisterScale.enable();                    // DESCOMENTAR QUANDO TIVER O SERVIÇO ANDROID PRONTO  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 }
 
 void loop() {
@@ -243,13 +245,13 @@ String serializeJson() {
 }
 
 void blinkOn() {
-  digitalWrite(LED, false);
+  digitalWrite(LED, true);
   taskBlinkControl.setCallback(&blinkOff);
   taskBlinkControl.delay(BLINK_DURATION);
 }
 
 void blinkOff() {
-  digitalWrite(LED, true);
+  digitalWrite(LED, false);
   taskBlinkControl.setCallback(&blinkOn);
   taskBlinkControl.disable();
 }
