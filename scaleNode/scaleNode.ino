@@ -3,6 +3,7 @@
 #include <ESP8266HTTPClient.h>
 #include <TaskScheduler.h>
 #include <HX711.h>
+#include <EEPROM.h>
 
 #define   MAX_LENGTH      200
 #define   LED             13   // pin GPIO13 aka D7
@@ -184,7 +185,7 @@ void setup() {
   scale.power_down();
 
   taskCheckWifi.enable();
-  taskRegisterScale.enable();                    // DESCOMENTAR QUANDO TIVER O SERVIÇO ANDROID PRONTO  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+  taskRegisterScale.enable();
 }
 
 void loop() {
