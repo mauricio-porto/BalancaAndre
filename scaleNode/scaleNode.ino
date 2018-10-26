@@ -14,6 +14,7 @@
 #define   HX711_SCK       14  // HX711.PD_SCK  - pin GPIO14 aka D5
 
 float scale_fix = -11800.f;   // this value is obtained by calibrating the scale with known weights; see the README for details
+int eeAddress = 0; //EEPROM address to start reading from
 
 // Prototypes
 int readScale();
@@ -24,6 +25,8 @@ void blinkOn();
 void blinkOff();
 void checkWifi();
 void registerScale();
+void saveScaleFix(float fix);
+float readScaleFix();
 
 typedef struct {
   String cmd;
@@ -60,6 +63,7 @@ boolean waitingCalibration;
 void setup() {
 
   Serial.begin(115200);
+  EEPROM.begin(512);
 
   pinMode(LED, OUTPUT);
   digitalWrite(LED, false);
@@ -180,6 +184,7 @@ void setup() {
   runner.addTask(taskCheckWifi);
   runner.addTask(taskRegisterScale);
 
+  scale_fix = readScaleFix();
   scale.set_scale(scale_fix);
   scale.tare();                                     // A BALANÇA DEVE ESTAR VAZIA, LIMPA
   scale.power_down();
@@ -213,6 +218,7 @@ void calibrateScale(int weight) {
   float u = scale.get_units(10);
   scale_fix = u / w;
   scale.set_scale(scale_fix);
+  saveScaleFix(scale_fix);
   scale.power_down();
   waitingCalibration = false;
 
@@ -287,6 +293,30 @@ void registerScale() {
     taskRegisterScale.disable();
     Serial.println("\n\nBalanca registrada!\n\n");
   }
+}
 
+void saveScaleFix(float fix) {
+  Serial.printf("Vai salvar %f na EEPROM\n", fix);
+  EEPROM.put(eeAddress, fix);
+  EEPROM.commit();
+  delay(1000);
+  readScaleFix();
+}
+
+float readScaleFix() {
+  float result = -11800.f;
+
+  float niceTry = 0.0f;
+  EEPROM.get(eeAddress, niceTry);
+
+  Serial.printf("Eis o scale_fix lido %f\n", niceTry);
+
+  if (!isnan(niceTry) && niceTry != 0.0f) {
+    result = niceTry;
+  }
+
+  Serial.printf("E vai retornar %f\n", result);
+
+  return result;
 }
 
